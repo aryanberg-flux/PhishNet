@@ -1,0 +1,6 @@
+datasets/phishing_email.csv
+ai_ml/*.pkl
+datasets/
+*.pkl
+__pycache__/
+*.pyc
