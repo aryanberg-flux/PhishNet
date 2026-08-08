@@ -1,0 +1,383 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   PhishNet — design tokens
+   Aesthetic: SIGINT operations console. Hairline grids, phosphor
+   glow, crimson threat accents, squared technical display type.
+   ============================================================ */
+@layer base {
+  :root {
+    /* light "daylight ops" variant */
+    --c-base: 236 238 243;
+    --c-panel: 251 252 254;
+    --c-panel-2: 241 243 248;
+    --c-hair: 209 214 226;
+    --c-hair-2: 223 227 237;
+    --c-ink: 12 17 28;
+    --c-dim: 62 72 92;
+    --c-faint: 92 103 124;
+    --c-threat: 186 20 40;
+    --c-warn: 148 92 4;
+    --c-safe: 6 106 79;
+    --c-beam: 22 105 178;
+    --c-node: 116 62 178;
+    --grid-a: 15 21 34;
+    --grid-op: 0.055;
+  }
+
+  .dark {
+    --c-base: 2 6 23; /* slate-950 */
+    --c-panel: 8 14 33;
+    --c-panel-2: 15 23 42; /* slate-900 */
+    --c-hair: 30 41 59; /* slate-800 */
+    --c-hair-2: 22 32 52;
+    /* Contrast raised for legibility: dim/faint were slate-400/500, which
+       fall below WCAG AA for small text on a near-black ground. */
+    --c-ink: 241 245 249;
+    --c-dim: 191 202 216;
+    --c-faint: 154 168 187;
+    --c-threat: 255 108 118;
+    --c-warn: 252 195 66;
+    --c-safe: 52 220 160;
+    --c-beam: 56 173 248;
+    --c-node: 167 128 250;
+    --grid-a: 148 197 255;
+    --grid-op: 0.07;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* 17px base (vs browser default 16). Using % keeps the reader's own
+       browser/OS font-size preference working as a multiplier. */
+    font-size: 106.25%;
+  }
+
+  body {
+    @apply bg-base font-sans text-base text-ink antialiased;
+    overflow-x: hidden;
+    /* generous default leading — the single biggest readability lever */
+    line-height: 1.65;
+  }
+
+  /* Readable measure: long lines are hard to track for every age group. */
+  p {
+    max-width: 68ch;
+  }
+
+  ::selection {
+    background: rgb(var(--c-threat) / 0.28);
+    color: rgb(var(--c-ink));
+  }
+
+  :where(button, a, input, textarea, select, [tabindex]):focus-visible {
+    outline: 1px solid rgb(var(--c-beam) / 0.9);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgb(var(--c-base));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-hair));
+    border: 2px solid rgb(var(--c-base));
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--c-faint) / 0.7);
+  }
+}
+
+@layer components {
+  /* ---------- surfaces ---------- */
+  .panel {
+    @apply relative border border-hair bg-panel;
+    background-image: linear-gradient(
+      170deg,
+      rgb(var(--c-panel-2) / 0.75),
+      rgb(var(--c-panel) / 0.2) 55%
+    );
+  }
+
+  /* corner registration marks — signature detail */
+  .cut::before,
+  .cut::after {
+    content: "";
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    pointer-events: none;
+    border-color: rgb(var(--c-faint) / 0.55);
+  }
+  .cut::before {
+    top: -1px;
+    left: -1px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+  .cut::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 1px solid;
+    border-right: 1px solid;
+  }
+
+  /* Micro-labels: were 10px uppercase at 0.22em tracking — the least
+     readable combination in the UI. Now 13px at gentle tracking, and
+     the dim `faint` tone is dropped in favour of `dim` for contrast. */
+  .label {
+    @apply font-mono text-2xs uppercase tracking-hud text-dim;
+  }
+
+  .hud {
+    @apply font-mono text-2xs tracking-hud;
+    text-transform: none;
+  }
+
+  /* ---------- atmosphere ---------- */
+  .grid-bg {
+    background-image:
+      linear-gradient(rgb(var(--grid-a) / var(--grid-op)) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--grid-a) / var(--grid-op)) 1px, transparent 1px);
+    background-size: 46px 46px;
+    background-position: center;
+    -webkit-mask-image: radial-gradient(ellipse 105% 78% at 50% 0%, #000 20%, transparent 78%);
+    mask-image: radial-gradient(ellipse 105% 78% at 50% 0%, #000 20%, transparent 78%);
+  }
+
+  .noise {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  }
+
+  /* ---------- controls ---------- */
+  /* Controls: larger label, mixed case, and ≥44px tall touch targets. */
+  .btn {
+    @apply relative inline-flex select-none items-center justify-center gap-2 border font-sans
+           text-xs font-bold tracking-hud transition-all duration-200
+           disabled:cursor-not-allowed disabled:opacity-45;
+    min-height: 2.75rem;
+  }
+  .btn-ghost {
+    @apply btn border-hair bg-panel2/60 px-3.5 py-2 text-dim hover:border-faint/60 hover:text-ink;
+  }
+  .btn-primary {
+    @apply btn border-threat/60 px-6 py-3.5 text-sm font-bold text-ink;
+    background: linear-gradient(100deg, rgb(var(--c-threat) / 0.24), rgb(var(--c-threat) / 0.08));
+  }
+  .btn-primary:not(:disabled):hover {
+    border-color: rgb(var(--c-threat) / 0.95);
+    box-shadow: 0 0 26px -6px rgb(var(--c-threat) / 0.6);
+    background: linear-gradient(100deg, rgb(var(--c-threat) / 0.38), rgb(var(--c-threat) / 0.14));
+  }
+  .btn-primary:not(:disabled):active {
+    transform: translateY(1px);
+  }
+
+  .ticks {
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgb(var(--c-hair)) 0 1px,
+      transparent 1px 7px
+    );
+  }
+}
+
+/* ============================================================
+   Indic typography correction.
+   Devanagari has no letter case, and wide tracking pulls matras
+   and conjuncts away from their base glyphs. Latin micro-label
+   styling is therefore relaxed for HI / MR.
+   ============================================================ */
+html[lang="hi"],
+html[lang="mr"] {
+  --tracking-hud: 0;
+}
+/* Devanagari carries more vertical detail, so it needs slightly more size
+   and leading than Latin at the same nominal point size. */
+html[lang="hi"] body,
+html[lang="mr"] body {
+  font-size: 1.0625rem;
+  line-height: 1.8;
+}
+html[lang="hi"] .hud,
+html[lang="mr"] .hud,
+html[lang="hi"] .label,
+html[lang="mr"] .label,
+html[lang="hi"] .btn,
+html[lang="mr"] .btn {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: "Noto Sans Devanagari", "Atkinson Hyperlegible", sans-serif;
+}
+html[lang="hi"] .font-display,
+html[lang="mr"] .font-display,
+html[lang="hi"] h1,
+html[lang="mr"] h1,
+html[lang="hi"] h2,
+html[lang="mr"] h2,
+html[lang="hi"] h3,
+html[lang="mr"] h3 {
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+/* Devanagari needs a touch more line-height to clear ascending matras */
+html[lang="hi"] .hud,
+html[lang="mr"] .hud {
+  line-height: 1.75;
+}
+
+/* Keyframes referenced from inline styles / injected CSS, which Tailwind's
+   scanner cannot reach via an animate-* utility. Declared here explicitly. */
+@keyframes ring {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.75;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+@keyframes bar {
+  from {
+    width: 0%;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slidein {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer utilities {
+  .stack-delay > * {
+    animation: rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .stack-delay > *:nth-child(1) {
+    animation-delay: 0.04s;
+  }
+  .stack-delay > *:nth-child(2) {
+    animation-delay: 0.12s;
+  }
+  .stack-delay > *:nth-child(3) {
+    animation-delay: 0.2s;
+  }
+  .stack-delay > *:nth-child(4) {
+    animation-delay: 0.28s;
+  }
+  .stack-delay > *:nth-child(5) {
+    animation-delay: 0.36s;
+  }
+  .stack-delay > *:nth-child(6) {
+    animation-delay: 0.44s;
+  }
+  .text-glow {
+    text-shadow: 0 0 22px rgb(var(--c-threat) / 0.45);
+  }
+}
+
+/* ============================================================
+   Leaflet overrides — force the map into the console language
+   ============================================================ */
+.leaflet-container {
+  background: rgb(var(--c-base)) !important;
+  font-family: "IBM Plex Mono", monospace;
+  outline: none;
+}
+.leaflet-tile-pane {
+  filter: saturate(0.55) contrast(1.06) brightness(0.92);
+}
+html:not(.dark) .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) saturate(0.3) brightness(1.02) contrast(0.92);
+}
+.leaflet-control-zoom a {
+  background: rgb(var(--c-panel-2)) !important;
+  color: rgb(var(--c-dim)) !important;
+  border-color: rgb(var(--c-hair)) !important;
+  font-weight: 500;
+}
+.leaflet-control-zoom a:hover {
+  color: rgb(var(--c-ink)) !important;
+  background: rgb(var(--c-hair)) !important;
+}
+.leaflet-control-attribution {
+  background: rgb(var(--c-base) / 0.82) !important;
+  color: rgb(var(--c-faint)) !important;
+  font-size: 9px !important;
+  border-top: 1px solid rgb(var(--c-hair));
+  border-left: 1px solid rgb(var(--c-hair));
+}
+.leaflet-control-attribution a {
+  color: rgb(var(--c-dim)) !important;
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: rgb(var(--c-panel)) !important;
+  color: rgb(var(--c-ink)) !important;
+  border: 1px solid rgb(var(--c-hair)) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 26px 60px -22px rgb(0 0 0 / 0.8) !important;
+}
+.leaflet-popup-content {
+  margin: 0 !important;
+  width: 234px !important;
+  line-height: 1.45;
+}
+.leaflet-popup-close-button {
+  color: rgb(var(--c-faint)) !important;
+  padding: 6px 7px 0 0 !important;
+}
+.leaflet-popup-close-button:hover {
+  color: rgb(var(--c-threat)) !important;
+}
+.leaflet-tooltip {
+  background: rgb(var(--c-panel)) !important;
+  border: 1px solid rgb(var(--c-hair)) !important;
+  border-radius: 0 !important;
+  color: rgb(var(--c-ink)) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  box-shadow: none !important;
+  padding: 3px 7px !important;
+}
+.leaflet-tooltip::before {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

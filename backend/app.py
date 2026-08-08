@@ -23,6 +23,7 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 from ai_ml.rule_engine import analyze_text as analyze_rules
 from ai_ml.risk_engine import evaluate
 from ai_ml.predictor import predict_text
+from ai_ml.gemma_explainer import explain_analysis
 
 
 # ============================================================
@@ -153,9 +154,16 @@ def analyze_message(text):
     # --------------------------------------------------------
 
     risk_result = evaluate(
-        rule_result,
-        ml_result
-    )
+    rule_result,
+    ml_result
+)
+
+    gemma_explanation = explain_analysis(
+    text,
+    ml_result,
+    rule_result,
+    risk_result["risk"]
+)
 
     # --------------------------------------------------------
     # 4. FINAL RESPONSE
@@ -168,8 +176,7 @@ def analyze_message(text):
 
         "risk": risk_result["risk"],
 
-        "explanation": risk_result["explanation"],
-
+        "explanation": gemma_explanation,
         "recommended_actions": [
             "Do not click suspicious links.",
             "Do not provide passwords or OTPs.",
