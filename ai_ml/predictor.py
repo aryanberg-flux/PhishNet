@@ -1,35 +1,57 @@
 import pickle
-from ocr import extract_text
+import re
+from pathlib import Path
+
+try:
+    from .ocr import extract_text
+except ImportError:
+    from ocr import extract_text
 
 
-# ==============================
-# LOAD TRAINED MODEL
-# ==============================
+# ==========================================
+# LOAD TRAINED MODEL + VECTORIZER
+# ==========================================
 
-with open("phishing_model.pkl", "rb") as model_file:
+BASE_DIR = Path(__file__).resolve().parent
+
+with open(BASE_DIR / "phishing_model.pkl", "rb") as model_file:
     model = pickle.load(model_file)
 
-with open("vectorizer.pkl", "rb") as vectorizer_file:
+with open(BASE_DIR / "vectorizer.pkl", "rb") as vectorizer_file:
     vectorizer = pickle.load(vectorizer_file)
 
 
-# ==============================
-# PREDICTION FUNCTION
-# ==============================
+# ==========================================
+# TEXT PREPROCESSING
+# ==========================================
+
+def clean_text(text):
+    text = str(text)
+    text = text.lower()
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+# ==========================================
+# PREDICT EMAIL
+# ==========================================
 
 def predict_email(email_text):
 
-    # Convert email text into TF-IDF features
+    # Same preprocessing used during training
+    email_text = clean_text(email_text)
+
+    # Convert text to TF-IDF features
     vector = vectorizer.transform([email_text])
 
-    # Get prediction
+    # Logistic Regression prediction
     prediction = model.predict(vector)[0]
 
-    # Get probabilities for both classes
+    # Prediction probabilities
     probabilities = model.predict_proba(vector)[0]
 
-    legitimate_probability = probabilities[0] * 100
-    phishing_probability = probabilities[1] * 100
+    legitimate_probability = float(probabilities[0] * 100)
+    phishing_probability = float(probabilities[1] * 100)
 
     # Convert prediction to readable label
     if prediction == 1:
@@ -39,26 +61,51 @@ def predict_email(email_text):
         result = "Legitimate"
         confidence = legitimate_probability
 
-    return result, confidence, legitimate_probability, phishing_probability
+    return (
+        result,
+        float(confidence),
+        legitimate_probability,
+        phishing_probability
+    )
 
 
-# ==============================
+# ==========================================
+# BACKEND INTERFACE
+# ==========================================
+
+def predict_text(text):
+
+    result, confidence, legitimate_probability, phishing_probability = (
+        predict_email(text)
+    )
+
+    return {
+        "label": result,
+        "confidence": float(confidence),
+        "phishing_probability": float(phishing_probability),
+        "legitimate_probability": float(legitimate_probability)
+    }
+
+
+# ==========================================
 # TEST OCR → ML PIPELINE
-# ==============================
+# ==========================================
 
 if __name__ == "__main__":
 
-    image_path = r"C:\Users\Aryan\Desktop\WhatsApp Image 2026-08-06 at 10.23.06 PM.jpeg"
+    image_path = (
+        r"C:\Users\Aryan\Desktop"
+        r"\WhatsApp Image 2026-08-06 at 10.23.06 PM.jpeg"
+    )
 
     print("Extracting text from image...")
 
-    # OCR
     email_text = extract_text(image_path)
 
     print("\n--- EXTRACTED TEXT ---")
     print(email_text)
 
-    # ML prediction
+    # Test normal prediction
     result, confidence, legitimate_probability, phishing_probability = (
         predict_email(email_text)
     )
@@ -68,5 +115,16 @@ if __name__ == "__main__":
     print(f"Confidence: {confidence:.2f}%")
 
     print("\n--- PROBABILITIES ---")
-    print(f"Legitimate probability: {legitimate_probability:.2f}%")
-    print(f"Phishing probability: {phishing_probability:.2f}%")
+    print(
+        f"Legitimate probability: "
+        f"{legitimate_probability:.2f}%"
+    )
+
+    print(
+        f"Phishing probability: "
+        f"{phishing_probability:.2f}%"
+    )
+
+    # Test backend format
+    print("\n--- BACKEND FORMAT ---")
+    print(predict_text(email_text))
