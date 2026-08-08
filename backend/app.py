@@ -1,335 +1,382 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv
 
-load_dotenv()
+import os
+import tempfile
+
+
+# ============================================================
+# APP CONFIGURATION
+# ============================================================
 
 app = Flask(__name__)
 CORS(app)
 
-
-# =========================================================
-# CONFIGURATION
-# =========================================================
-
-MAX_TEXT_LENGTH = 50_000
-
-ALLOWED_IMAGE_EXTENSIONS = {
-    "png",
-    "jpg",
-    "jpeg",
-    "webp"
-}
+# Maximum upload size: 10 MB
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 
-# =========================================================
-# HELPERS
-# =========================================================
+# ============================================================
+# AI / ML IMPORTS
+# ============================================================
 
-def error_response(message, status_code=400):
-    return jsonify({
-        "success": False,
-        "error": message
-    }), status_code
+from ai_ml.rule_engine import analyze_text as analyze_rules
+from ai_ml.risk_engine import evaluate
+from ai_ml.predictor import predict_text
 
 
-def allowed_image(filename):
-    if not filename or "." not in filename:
-        return False
+# ============================================================
+# ROOT / HEALTH CHECK
+# ============================================================
 
-    extension = filename.rsplit(".", 1)[1].lower()
-
-    return extension in ALLOWED_IMAGE_EXTENSIONS
-
-
-# =========================================================
-# HEALTH CHECK
-# =========================================================
-
-@app.route("/api/health", methods=["GET"])
-def health_check():
-
+@app.route("/", methods=["GET"])
+def home():
     return jsonify({
         "success": True,
         "service": "Phisnet Backend",
         "status": "running"
-    })
+    }), 200
 
 
-# =========================================================
-# TEXT ANALYSIS
-# =========================================================
-
-@app.route("/api/analyze/text", methods=["POST"])
-def analyze_text():
-
-    data = request.get_json(silent=True)
-
-    if not data:
-        return error_response(
-            "Request body must contain JSON."
-        )
-
-    text = data.get("text", "")
-
-    if not isinstance(text, str):
-        return error_response(
-            "The text field must be a string."
-        )
-
-    # -----------------------------------------------------
-    # Normalize text
-    # -----------------------------------------------------
-
-    try:
-        from ai_ml.text_normalizer import normalize_text
-
-        text = normalize_text(text)
-
-    except ImportError as error:
-
-        print("TEXT NORMALIZER ERROR:", error)
-
-        return error_response(
-            "Text normalizer module not found.",
-            500
-        )
-
-    if not text:
-        return error_response(
-            "Please provide a message to analyze."
-        )
-
-    if len(text) > MAX_TEXT_LENGTH:
-        return error_response(
-            f"Message is too long. Maximum length is "
-            f"{MAX_TEXT_LENGTH} characters."
-        )
-
-    # -----------------------------------------------------
-    # Analysis
-    # -----------------------------------------------------
-
-    analysis = analyze_message(text)
-
+@app.route("/api/health", methods=["GET"])
+def health():
     return jsonify({
         "success": True,
-        "source": "text",
-        "extracted_text": text,
-        "analysis": analysis
-    })
+        "service": "Phisnet Backend",
+        "status": "running",
+        "components": {
+            "rule_engine": True,
+            "ml_model": True,
+            "risk_engine": True,
+            "ocr": True
+        }
+    }), 200
 
 
-# =========================================================
-# IMAGE / SCREENSHOT ANALYSIS
-# =========================================================
+# ============================================================
+# COMPLETE ANALYSIS PIPELINE
+# ============================================================
 
-@app.route("/api/analyze/image", methods=["POST"])
-def analyze_image():
+def analyze_message(text):
+    """
+    Complete PhishNet analysis pipeline.
 
-    image_file = request.files.get("image")
+    Text
+      |
+      v
+    Rule Engine
+      |
+      +--------------------+
+      |                    |
+      v                    v
+    Rule Score         ML Predictor
+      |                    |
+      |                    v
+      |               ML Prediction
+      |                    |
+      +---------+----------+
+                |
+                v
+           Risk Engine
+                |
+                v
+          Final Result
+    """
 
-    if image_file is None:
-        return error_response(
-            "No image was uploaded. "
-            "Use the field name 'image'."
+    # --------------------------------------------------------
+    # Validate input
+    # --------------------------------------------------------
+
+    if not isinstance(text, str):
+        raise ValueError("Text must be a string.")
+
+    text = text.strip()
+
+    if not text:
+        raise ValueError("Text cannot be empty.")
+
+    # --------------------------------------------------------
+    # 1. RULE ENGINE
+    # --------------------------------------------------------
+
+    rule_result = analyze_rules(text)
+
+    # --------------------------------------------------------
+    # 2. ML MODEL
+    # --------------------------------------------------------
+
+    # IMPORTANT:
+    # Do NOT set ml_result to None.
+    #
+    # predict_text() loads Aryan's trained model and vectorizer
+    # and returns:
+    #
+    # {
+    #     "label": "...",
+    #     "confidence": ...,
+    #     "phishing_probability": ...,
+    #     "legitimate_probability": ...
+    # }
+
+    ml_result = predict_text(text)
+
+    # --------------------------------------------------------
+    # Validate ML response
+    # --------------------------------------------------------
+
+    if not isinstance(ml_result, dict):
+        raise ValueError(
+            "ML predictor returned an invalid response."
         )
 
-    if not image_file.filename:
-        return error_response(
-            "The uploaded image has no filename."
+    required_ml_fields = [
+        "label",
+        "confidence",
+        "phishing_probability",
+        "legitimate_probability"
+    ]
+
+    missing_fields = [
+        field
+        for field in required_ml_fields
+        if field not in ml_result
+    ]
+
+    if missing_fields:
+        raise ValueError(
+            "ML predictor response is missing fields: "
+            + ", ".join(missing_fields)
         )
 
-    if not allowed_image(image_file.filename):
-        return error_response(
-            "Unsupported image format. "
-            "Use PNG, JPG, JPEG, or WEBP."
-        )
+    # --------------------------------------------------------
+    # 3. RISK ENGINE
+    # --------------------------------------------------------
+
+    risk_result = evaluate(
+        rule_result,
+        ml_result
+    )
+
+    # --------------------------------------------------------
+    # 4. FINAL RESPONSE
+    # --------------------------------------------------------
+
+    return {
+        "prediction": ml_result,
+
+        "rules": rule_result,
+
+        "risk": risk_result["risk"],
+
+        "explanation": risk_result["explanation"],
+
+        "recommended_actions": [
+            "Do not click suspicious links.",
+            "Do not provide passwords or OTPs.",
+            "Verify the sender through an official channel."
+        ]
+    }
+
+
+# ============================================================
+# TEXT ANALYSIS
+# ============================================================
+
+@app.route("/api/analyze/text", methods=["POST"])
+def analyze_text_route():
 
     try:
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Read JSON
+        # ----------------------------------------------------
+
+        data = request.get_json(silent=True)
+
+        if not isinstance(data, dict):
+            return jsonify({
+                "success": False,
+                "error": "JSON request body is required."
+            }), 400
+
+        # ----------------------------------------------------
+        # Get text
+        # ----------------------------------------------------
+
+        text = data.get("text")
+
+        if not isinstance(text, str):
+            return jsonify({
+                "success": False,
+                "error": "Missing 'text' field."
+            }), 400
+
+        text = text.strip()
+
+        if not text:
+            return jsonify({
+                "success": False,
+                "error": "Text cannot be empty."
+            }), 400
+
+        # ----------------------------------------------------
+        # Run complete pipeline
+        # ----------------------------------------------------
+
+        analysis = analyze_message(text)
+
+        # ----------------------------------------------------
+        # Return response
+        # ----------------------------------------------------
+
+        return jsonify({
+            "success": True,
+            "source": "text",
+            "extracted_text": text,
+            "analysis": analysis
+        }), 200
+
+    except Exception as error:
+
+        print("TEXT ANALYSIS ERROR:", repr(error))
+
+        return jsonify({
+            "success": False,
+            "error": str(error)
+        }), 500
+
+
+# ============================================================
+# IMAGE / OCR ANALYSIS
+# ============================================================
+
+@app.route("/api/analyze/image", methods=["POST"])
+def analyze_image_route():
+
+    temporary_file = None
+
+    try:
+
+        # ----------------------------------------------------
+        # Check image upload
+        # ----------------------------------------------------
+
+        if "image" not in request.files:
+            return jsonify({
+                "success": False,
+                "error": "No image file supplied."
+            }), 400
+
+        image = request.files["image"]
+
+        if image.filename is None or image.filename == "":
+            return jsonify({
+                "success": False,
+                "error": "No image selected."
+            }), 400
+
+        # ----------------------------------------------------
+        # Create temporary image file
+        # ----------------------------------------------------
+
+        extension = os.path.splitext(image.filename)[1]
+
+        if not extension:
+            extension = ".png"
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=extension
+        ) as temp_file:
+
+            image.save(temp_file.name)
+            temporary_file = temp_file.name
+
+        # ----------------------------------------------------
         # OCR
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         from ai_ml.ocr import extract_text
 
-        extracted_text = extract_text(image_file)
+        extracted_text = extract_text(temporary_file)
+
+        if not isinstance(extracted_text, str):
+            extracted_text = str(extracted_text)
+
+        extracted_text = extracted_text.strip()
 
         if not extracted_text:
-            return error_response(
-                "No text could be extracted from the image.",
-                422
-            )
+            return jsonify({
+                "success": False,
+                "source": "image",
+                "extracted_text": "",
+                "error": "OCR could not extract text."
+            }), 422
 
-        # -------------------------------------------------
-        # Normalize OCR output
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Run complete Rule + ML + Risk pipeline
+        # ----------------------------------------------------
 
-        from ai_ml.text_normalizer import normalize_text
+        analysis = analyze_message(extracted_text)
 
-        extracted_text = normalize_text(
-            extracted_text
-        )
-
-        if not extracted_text:
-            return error_response(
-                "No readable text was found in the image.",
-                422
-            )
-
-        # -------------------------------------------------
-        # Analysis
-        # -------------------------------------------------
-
-        analysis = analyze_message(
-            extracted_text
-        )
+        # ----------------------------------------------------
+        # Return response
+        # ----------------------------------------------------
 
         return jsonify({
             "success": True,
             "source": "image",
             "extracted_text": extracted_text,
             "analysis": analysis
-        })
-
-    except ImportError as error:
-
-        print("MODULE ERROR:", error)
-
-        return error_response(
-            "Required AI/ML module was not found.",
-            500
-        )
+        }), 200
 
     except Exception as error:
 
-        print("IMAGE ANALYSIS ERROR:", error)
+        print("IMAGE ANALYSIS ERROR:", repr(error))
 
-        return error_response(
-            "Unable to process the uploaded image.",
-            500
-        )
+        return jsonify({
+            "success": False,
+            "error": str(error)
+        }), 500
+
+    finally:
+
+        # ----------------------------------------------------
+        # Remove temporary file
+        # ----------------------------------------------------
+
+        if temporary_file and os.path.exists(temporary_file):
+
+            try:
+                os.remove(temporary_file)
+
+            except Exception as cleanup_error:
+                print(
+                    "TEMP FILE CLEANUP ERROR:",
+                    repr(cleanup_error)
+                )
 
 
-# =========================================================
-# COMMON ANALYSIS PIPELINE
-# =========================================================
-
-def analyze_message(text):
-    """
-    Complete analysis pipeline.
-
-    Current pipeline:
-
-        Text
-          ↓
-        Rule Engine
-          ↓
-        Risk Engine
-          ↓
-        Final result
-
-    ML is intentionally not connected yet.
-    """
-
-    try:
-
-        # -------------------------------------------------
-        # Rule Engine
-        # -------------------------------------------------
-
-        from ai_ml.rule_engine import analyze_text
-
-        rule_result = analyze_text(text)
-
-        # -------------------------------------------------
-        # Risk Engine
-        # -------------------------------------------------
-
-        from ai_ml.risk_engine import evaluate
-
-        # Aryan's ML model will be connected here later.
-        # For now, Risk Engine operates in rule-only mode.
-        ml_result = None
-
-        risk_result = evaluate(
-            rule_result,
-            ml_result
-        )
-
-        # -------------------------------------------------
-        # Return combined result
-        # -------------------------------------------------
-
-        return {
-            "prediction": {
-                "label": "pending_ml_model",
-                "confidence": None,
-                "phishing_probability": None,
-                "legitimate_probability": None
-            },
-
-            "rules": rule_result,
-
-            "risk": risk_result["risk"],
-
-            "explanation": risk_result["explanation"],
-
-            "recommended_actions": [
-                "Do not click suspicious links.",
-                "Do not provide passwords or OTPs.",
-                "Verify the sender through an official channel."
-            ]
-        }
-
-    except Exception as error:
-
-        print("ANALYSIS ERROR:", error)
-
-        return {
-            "prediction": {
-                "label": "analysis_error",
-                "confidence": None,
-                "phishing_probability": None,
-                "legitimate_probability": None
-            },
-
-            "rules": {
-                "score": 0,
-                "risk_level": "UNKNOWN",
-                "signals": [],
-                "suspicious_urls": [],
-                "signal_count": 0
-            },
-
-            "risk": {
-                "score": 0,
-                "level": "UNKNOWN",
-                "method": "error",
-                "ml_available": False
-            },
-
-            "explanation": {
-                "summary": "Unable to complete message analysis.",
-                "reasons": [],
-                "risk_level": "UNKNOWN",
-                "risk_score": 0
-            },
-
-            "recommended_actions": []
-        }
-# =========================================================
+# ============================================================
 # ERROR HANDLERS
-# =========================================================
+# ============================================================
 
 @app.errorhandler(404)
-def page_not_found(error):
+def not_found(error):
 
     return jsonify({
         "success": False,
         "error": "API endpoint not found."
     }), 404
+
+
+@app.errorhandler(413)
+def file_too_large(error):
+
+    return jsonify({
+        "success": False,
+        "error": "File too large. Maximum size is 10 MB."
+    }), 413
 
 
 @app.errorhandler(500)
@@ -341,11 +388,20 @@ def internal_server_error(error):
     }), 500
 
 
-# =========================================================
-# START SERVER
-# =========================================================
+# ============================================================
+# START FLASK
+# ============================================================
 
 if __name__ == "__main__":
+
+    print("=" * 60)
+    print("PHISHNET BACKEND")
+    print("=" * 60)
+    print("Rule Engine : ENABLED")
+    print("ML Model    : ENABLED")
+    print("Risk Engine : ENABLED")
+    print("OCR         : ENABLED")
+    print("=" * 60)
 
     app.run(
         host="127.0.0.1",
