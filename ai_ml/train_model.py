@@ -1,61 +1,127 @@
 import pandas as pd
 import re
+import pickle
 
-# Step 1: Load the dataset
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    roc_auc_score
+)
+
+
+# =========================================================
+# STEP 1: LOAD ORIGINAL DATASET
+# =========================================================
+
 data = pd.read_csv("../datasets/phishing_email.csv")
 
-print("Dataset loaded successfully!")
+print("Original dataset loaded!")
 print("Original dataset shape:", data.shape)
 print()
 
-# Step 2: Remove duplicate rows
+
+# =========================================================
+# STEP 2: REMOVE DUPLICATES
+# =========================================================
+
 duplicate_count = data.duplicated().sum()
 
 print("Duplicate rows found:", duplicate_count)
 
 data.drop_duplicates(inplace=True)
 
-print("Duplicates removed successfully!")
-print("New dataset shape:", data.shape)
+print("Duplicates removed.")
+print("Dataset shape:", data.shape)
 print()
 
-# Step 3: Text preprocessing
+
+# =========================================================
+# STEP 3: LOAD SUPPLEMENTAL TRAINING DATA
+# =========================================================
+
+supplemental_path = "ai_ml/supplemental_training.csv"
+
+supplemental = pd.read_csv(supplemental_path)
+
+print("Supplemental training dataset loaded!")
+print("Supplemental samples:", len(supplemental))
+print()
+
+print("Supplemental label distribution:")
+print(supplemental["label"].value_counts())
+print()
+
+
+# =========================================================
+# STEP 4: COMBINE DATASETS
+# =========================================================
+
+data = pd.concat(
+    [
+        data[["text_combined", "label"]].rename(
+            columns={"text_combined": "text"}
+        ),
+        supplemental[["text", "label"]]
+    ],
+    ignore_index=True
+)
+
+print("Datasets combined successfully!")
+print("Combined dataset shape:", data.shape)
+print()
+
+
+# =========================================================
+# STEP 5: TEXT PREPROCESSING
+# =========================================================
+
 def clean_text(text):
+
     text = str(text)
-    
-    # Convert text to lowercase
+
     text = text.lower()
-    
-    # Remove extra whitespace
-    text = re.sub(r"\s+", " ", text).strip()
-    
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
     return text
 
 
-data["text_combined"] = data["text_combined"].apply(clean_text)
+data["text"] = data["text"].apply(clean_text)
 
 print("Text preprocessing completed!")
 print()
-print("Sample cleaned email:")
-print(data["text_combined"].iloc[0])
 
-# Step 3B: Separate features and labels
 
-X = data["text_combined"]
+# =========================================================
+# STEP 6: FEATURES + LABELS
+# =========================================================
+
+X = data["text"]
 y = data["label"]
 
-print()
-print("Features and labels separated successfully!")
-print("Number of emails:", len(X))
-print("Number of labels:", len(y))
+print("Features and labels separated.")
+print("Total emails:", len(X))
 
 print()
 print("Label distribution:")
 print(y.value_counts())
+print()
 
-# Step 4: Split dataset into training and testing sets
 
-from sklearn.model_selection import train_test_split
+# =========================================================
+# STEP 7: TRAIN / TEST SPLIT
+# =========================================================
 
 X_train, X_test, y_train, y_test = train_test_split(
     X,
@@ -65,23 +131,16 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
-print()
 print("Train/test split completed!")
 
 print("Training samples:", len(X_train))
 print("Testing samples:", len(X_test))
-
 print()
-print("Training label distribution:")
-print(y_train.value_counts())
 
-print()
-print("Testing label distribution:")
-print(y_test.value_counts())
 
-# Step 5: TF-IDF Vectorization
-
-from sklearn.feature_extraction.text import TfidfVectorizer
+# =========================================================
+# STEP 8: TF-IDF
+# =========================================================
 
 vectorizer = TfidfVectorizer(
     ngram_range=(1, 2),
@@ -90,51 +149,78 @@ vectorizer = TfidfVectorizer(
 )
 
 X_train_tfidf = vectorizer.fit_transform(X_train)
+
 X_test_tfidf = vectorizer.transform(X_test)
 
-print()
 print("TF-IDF vectorization completed!")
 
-print("Training TF-IDF shape:", X_train_tfidf.shape)
-print("Testing TF-IDF shape:", X_test_tfidf.shape)
+print(
+    "Training TF-IDF shape:",
+    X_train_tfidf.shape
+)
 
-# Step 6: Train Logistic Regression
+print(
+    "Testing TF-IDF shape:",
+    X_test_tfidf.shape
+)
 
-from sklearn.linear_model import LogisticRegression
+print()
+
+
+# =========================================================
+# STEP 9: TRAIN LOGISTIC REGRESSION
+# =========================================================
 
 model = LogisticRegression(
     max_iter=1000,
     class_weight="balanced"
 )
 
-print()
 print("Training Logistic Regression model...")
 
-model.fit(X_train_tfidf, y_train)
-
-print("Model training completed!")
-
-# Step 7: Evaluate the model
-
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix
+model.fit(
+    X_train_tfidf,
+    y_train
 )
 
-# Generate predictions on test data
-predictions = model.predict(X_test_tfidf)
-
-# Calculate evaluation metrics
-accuracy = accuracy_score(y_test, predictions)
-precision = precision_score(y_test, predictions)
-recall = recall_score(y_test, predictions)
-f1 = f1_score(y_test, predictions)
-cm = confusion_matrix(y_test, predictions)
-
+print("Model training completed!")
 print()
+
+
+# =========================================================
+# STEP 10: EVALUATE MODEL
+# =========================================================
+
+predictions = model.predict(
+    X_test_tfidf
+)
+
+accuracy = accuracy_score(
+    y_test,
+    predictions
+)
+
+precision = precision_score(
+    y_test,
+    predictions
+)
+
+recall = recall_score(
+    y_test,
+    predictions
+)
+
+f1 = f1_score(
+    y_test,
+    predictions
+)
+
+cm = confusion_matrix(
+    y_test,
+    predictions
+)
+
+
 print("Model Evaluation Results")
 print("------------------------")
 
@@ -147,44 +233,81 @@ print()
 print("Confusion Matrix:")
 print(cm)
 
-# Step 8: ROC-AUC and prediction confidence
 
-from sklearn.metrics import roc_auc_score
+# =========================================================
+# STEP 11: ROC-AUC
+# =========================================================
 
-# Get probability of phishing (class 1)
-probabilities = model.predict_proba(X_test_tfidf)[:, 1]
+probabilities = model.predict_proba(
+    X_test_tfidf
+)[:, 1]
 
-# Calculate ROC-AUC
-roc_auc = roc_auc_score(y_test, probabilities)
+roc_auc = roc_auc_score(
+    y_test,
+    probabilities
+)
 
 print()
 print("ROC-AUC:", roc_auc)
 
-# Show sample predictions with confidence
+
+# =========================================================
+# STEP 12: SAMPLE PREDICTIONS
+# =========================================================
+
 print()
 print("Sample prediction probabilities:")
 
 for i in range(5):
-    prediction = model.predict(X_test_tfidf[i])[0]
-    confidence = model.predict_proba(X_test_tfidf[i]).max()
 
-    label = "Phishing" if prediction == 1 else "Legitimate"
+    prediction = model.predict(
+        X_test_tfidf[i]
+    )[0]
+
+    confidence = model.predict_proba(
+        X_test_tfidf[i]
+    ).max()
+
+    label = (
+        "Phishing"
+        if prediction == 1
+        else "Legitimate"
+    )
 
     print(
         f"Email {i + 1}: {label} | "
         f"Confidence: {confidence * 100:.2f}%"
     )
 
-    # Step 9: Save the trained model and TF-IDF vectorizer
 
-import pickle
+# =========================================================
+# STEP 13: SAVE MODEL
+# =========================================================
 
-with open("phishing_model.pkl", "wb") as model_file:
-    pickle.dump(model, model_file)
+with open(
+    "ai_ml/phishing_model.pkl",
+    "wb"
+) as model_file:
 
-with open("vectorizer.pkl", "wb") as vectorizer_file:
-    pickle.dump(vectorizer, vectorizer_file)
+    pickle.dump(
+        model,
+        model_file
+    )
+
+
+with open(
+    "ai_ml/vectorizer.pkl",
+    "wb"
+) as vectorizer_file:
+
+    pickle.dump(
+        vectorizer,
+        vectorizer_file
+    )
+
 
 print()
 print("Model saved successfully!")
 print("Vectorizer saved successfully!")
+print()
+print("Training complete.")
