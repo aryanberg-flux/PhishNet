@@ -21,8 +21,8 @@ function Marquee() {
 
   const items = [
     t("telemetryLive"),
-    "OTP Â· CVV Â· UPI PIN â€” NEVER SHARE",
-    "cybercrime.gov.in Â· 1930",
+    "OTP · CVV · UPI PIN — NEVER SHARE",
+    "cybercrime.gov.in · 1930",
     t("appSubtitle"),
     "APK SIDELOAD = MALWARE",
   ];
@@ -38,7 +38,7 @@ function Marquee() {
             className="flex items-center gap-3 whitespace-nowrap px-5 py-2 hud text-dim"
           >
             {s}
-            <span className="text-threat">â—†</span>
+            <span className="text-threat">◆</span>
           </span>
         ))}
       </div>
@@ -439,7 +439,7 @@ function Dashboard() {
         <footer className="mt-7 flex flex-col items-center gap-2 border-t border-hair py-6 text-center">
           <span className="flex items-center gap-2 font-display text-base font-semibold uppercase tracking-widest text-dim">
             <ShieldAlert size={13} className="text-threat" strokeWidth={2.4} />
-            {t("appTitle")} â€” {t("tagline")}
+            {t("appTitle")} — {t("tagline")}
           </span>
 
           <span className="max-w-md hud leading-relaxed text-faint">
