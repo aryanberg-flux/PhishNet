@@ -16,6 +16,7 @@ RULE_WEIGHTS = {
     "impersonation": 20,
     "attachment_request": 15,
     "social_engineering": 15,
+    "password_expiration_link": 20,
 }
 
 
@@ -29,8 +30,10 @@ URGENCY_PATTERNS = [
     r"\bact now\b",
     r"\baction required\b",
     r"\bwithin\s+\d+\s*(hour|hours|minute|minutes|day|days)\b",
+    r"\bin\s+\d+\s*(hour|hours|minute|minutes|day|days)\b",
     r"\baccount.*(suspend|terminate|disable|blocked)\b",
     r"\bverify.*immediately\b",
+    r"\bexpire.*(today|tomorrow|soon)\b",
 ]
 
 
@@ -43,6 +46,18 @@ CREDENTIAL_PATTERNS = [
     r"\blog ?in\b",
     r"\bsign ?in\b",
     r"\bverify your account\b",
+]
+
+
+PASSWORD_EXPIRATION_PATTERNS = [
+    r"\bpassword\s+(will\s+)?expire\b",
+    r"\bpassword\s+expiration\b",
+    r"\bpassword\s+expires\b",
+    r"\bpassword\s+expiry\b",
+    r"\bupdate\s+your\s+password\b",
+    r"\brenew\s+your\s+password\b",
+    r"\breset\s+your\s+password\b",
+    r"\bchange\s+your\s+password\b",
 ]
 
 
@@ -118,7 +133,7 @@ SOCIAL_ENGINEERING_PATTERNS = [
 
 
 # =========================================================
-# HELPER
+# HELPER FUNCTIONS
 # =========================================================
 
 def find_matches(text, patterns):
@@ -129,7 +144,6 @@ def find_matches(text, patterns):
     matches = []
 
     for pattern in patterns:
-
         if re.search(pattern, text, flags=re.IGNORECASE):
             matches.append(pattern)
 
@@ -138,14 +152,40 @@ def find_matches(text, patterns):
 
 def extract_urls(text):
     """
-    Extract URLs from text.
+    Extract explicit HTTP/HTTPS URLs.
     """
 
     return re.findall(
         r"https?://[^\s<>\"]+",
         text,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
+
+
+def extract_link_like_values(text):
+    """
+    Detect explicit URLs plus common domain-like strings.
+
+    This helps OCR cases where the screenshot contains something
+    like 'myuniversity.edu/renewal' but OCR omits 'https://'.
+    """
+
+    explicit_urls = extract_urls(text)
+
+    domain_like = re.findall(
+        r"\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+"
+        r"(?:/[^\s<>\"]*)?\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    values = []
+
+    for value in explicit_urls + domain_like:
+        if value not in values:
+            values.append(value)
+
+    return values
 
 
 # =========================================================
@@ -174,9 +214,7 @@ def analyze_links(text):
     for url in urls:
 
         try:
-
             parsed = urlparse(url)
-
             domain = parsed.netloc.lower()
 
             reasons = []
@@ -191,7 +229,7 @@ def analyze_links(text):
             # IP address instead of domain
             if re.match(
                 r"^\d{1,3}(\.\d{1,3}){3}$",
-                domain
+                domain,
             ):
                 reasons.append("IP address used as domain")
 
@@ -202,11 +240,10 @@ def analyze_links(text):
                 )
 
             if reasons:
-
                 suspicious_urls.append({
                     "url": url,
                     "domain": domain,
-                    "reasons": reasons
+                    "reasons": reasons,
                 })
 
         except Exception:
@@ -238,8 +275,10 @@ def analyze_text(text):
     if not text:
         return {
             "score": 0,
+            "risk_level": "LOW",
             "signals": [],
-            "suspicious_urls": []
+            "suspicious_urls": [],
+            "signal_count": 0,
         }
 
     signals = []
@@ -249,7 +288,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, URGENCY_PATTERNS):
-
         signals.append({
             "type": "urgency",
             "severity": "high",
@@ -257,7 +295,7 @@ def analyze_text(text):
             "message": (
                 "The message uses urgent or "
                 "threatening language."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -265,7 +303,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, CREDENTIAL_PATTERNS):
-
         signals.append({
             "type": "credential_request",
             "severity": "critical",
@@ -273,7 +310,29 @@ def analyze_text(text):
             "message": (
                 "The message appears to request "
                 "account credentials."
-            )
+            ),
+        })
+
+    # -----------------------------------------------------
+    # Password Expiration + Link
+    # -----------------------------------------------------
+
+    password_expiration = find_matches(
+        text,
+        PASSWORD_EXPIRATION_PATTERNS,
+    )
+
+    link_like_values = extract_link_like_values(text)
+
+    if password_expiration and link_like_values:
+        signals.append({
+            "type": "password_expiration_link",
+            "severity": "high",
+            "score": RULE_WEIGHTS["password_expiration_link"],
+            "message": (
+                "The message combines password-expiration "
+                "language with a link requiring password action."
+            ),
         })
 
     # -----------------------------------------------------
@@ -281,7 +340,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, OTP_PATTERNS):
-
         signals.append({
             "type": "otp_request",
             "severity": "critical",
@@ -289,7 +347,7 @@ def analyze_text(text):
             "message": (
                 "The message contains language "
                 "related to OTP or verification codes."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -297,7 +355,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, FINANCIAL_PATTERNS):
-
         signals.append({
             "type": "financial_request",
             "severity": "high",
@@ -305,7 +362,7 @@ def analyze_text(text):
             "message": (
                 "The message contains financial "
                 "or payment-related requests."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -313,7 +370,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, PRIZE_PATTERNS):
-
         signals.append({
             "type": "prize_scam",
             "severity": "high",
@@ -321,7 +377,7 @@ def analyze_text(text):
             "message": (
                 "The message contains prize, "
                 "lottery, or reward-related language."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -329,7 +385,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, IMPERSONATION_PATTERNS):
-
         signals.append({
             "type": "impersonation",
             "severity": "medium",
@@ -337,7 +392,7 @@ def analyze_text(text):
             "message": (
                 "The message may be impersonating "
                 "an organization or authority."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -345,7 +400,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, ATTACHMENT_PATTERNS):
-
         signals.append({
             "type": "attachment_request",
             "severity": "medium",
@@ -353,7 +407,7 @@ def analyze_text(text):
             "message": (
                 "The message encourages the user "
                 "to open or download an attachment."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -361,7 +415,6 @@ def analyze_text(text):
     # -----------------------------------------------------
 
     if find_matches(text, SOCIAL_ENGINEERING_PATTERNS):
-
         signals.append({
             "type": "social_engineering",
             "severity": "high",
@@ -369,7 +422,7 @@ def analyze_text(text):
             "message": (
                 "The message contains language "
                 "designed to pressure or manipulate the user."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -379,7 +432,6 @@ def analyze_text(text):
     suspicious_urls = analyze_links(text)
 
     if suspicious_urls:
-
         signals.append({
             "type": "suspicious_link",
             "severity": "high",
@@ -387,7 +439,7 @@ def analyze_text(text):
             "message": (
                 "The message contains a potentially "
                 "suspicious URL."
-            )
+            ),
         })
 
     # -----------------------------------------------------
@@ -399,7 +451,6 @@ def analyze_text(text):
         for signal in signals
     )
 
-    # Keep score between 0 and 100
     score = min(raw_score, 100)
 
     # -----------------------------------------------------
@@ -408,13 +459,10 @@ def analyze_text(text):
 
     if score >= 75:
         risk_level = "CRITICAL"
-
     elif score >= 50:
         risk_level = "HIGH"
-
     elif score >= 25:
         risk_level = "MEDIUM"
-
     else:
         risk_level = "LOW"
 
@@ -427,7 +475,7 @@ def analyze_text(text):
         "risk_level": risk_level,
         "signals": signals,
         "suspicious_urls": suspicious_urls,
-        "signal_count": len(signals)
+        "signal_count": len(signals),
     }
 
 
@@ -457,6 +505,6 @@ if __name__ == "__main__":
         json.dumps(
             result,
             indent=4,
-            ensure_ascii=False
+            ensure_ascii=False,
         )
     )

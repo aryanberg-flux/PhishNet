@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 
@@ -5,16 +6,6 @@ from typing import Optional
 # CONFIGURATION
 # =========================================================
 
-# How much each component contributes to the final score.
-#
-# Rule Engine:
-#   40%
-#
-# ML Model:
-#   60%
-#
-# These weights can be changed later after testing Aryan's
-# model performance.
 RULE_WEIGHT = 0.40
 ML_WEIGHT = 0.60
 
@@ -24,49 +15,23 @@ ML_WEIGHT = 0.60
 # =========================================================
 
 def clamp_score(score):
-    """
-    Keep a score between 0 and 100.
-    """
+    """Keep a risk score between 0 and 100."""
 
     try:
         score = float(score)
     except (TypeError, ValueError):
         return 0.0
 
-    return max(0.0, min(score, 100.0))
+    if not math.isfinite(score):
+        return 0.0
 
-
-def probability_to_score(probability):
-    """
-    Convert an ML phishing probability such as:
-
-        0.95 -> 95
-        0.72 -> 72
-
-    If the model already provides a 0-100 score,
-    use that directly instead.
-    """
-
-    try:
-        probability = float(probability)
-    except (TypeError, ValueError):
-        return None
-
-    # Probability format: 0.0 - 1.0
-    if 0.0 <= probability <= 1.0:
-        return probability * 100
-
-    # Already percentage format: 0 - 100
-    if 0.0 <= probability <= 100.0:
-        return probability
-
-    return None
+    return max(0.0, min(100.0, score))
 
 
 def get_risk_level(score):
-    """
-    Convert final numerical score into a risk level.
-    """
+    """Convert a numeric risk score into a risk level."""
+
+    score = clamp_score(score)
 
     if score >= 75:
         return "CRITICAL"
@@ -80,63 +45,47 @@ def get_risk_level(score):
     return "LOW"
 
 
-# =========================================================
-# ML SCORE EXTRACTION
-# =========================================================
-
 def extract_ml_score(ml_result):
     """
-    Extract phishing probability from Aryan's ML model result.
+    Extract phishing probability from the ML result.
 
-    Supported formats:
-
-    {
-        "phishing_probability": 0.94
-    }
-
-    OR:
-
-    {
-        "phishing_probability": 94
-    }
-
-    OR:
-
-    {
-        "score": 94
-    }
-
-    Returns None if an ML result is not available.
+    Supports probabilities represented either as:
+        0.96
+    or:
+        96.0
     """
 
     if not isinstance(ml_result, dict):
         return None
 
-    # Preferred field
-    probability = ml_result.get(
-        "phishing_probability"
-    )
+    value = ml_result.get("phishing_probability")
 
-    score = probability_to_score(
-        probability
-    )
+    if value is None:
+        prediction = ml_result.get("prediction")
 
-    if score is not None:
-        return clamp_score(score)
+        if isinstance(prediction, dict):
+            value = prediction.get("phishing_probability")
 
-    # Fallback
-    model_score = ml_result.get(
-        "score"
-    )
+    if value is None:
+        return None
 
-    if model_score is not None:
-        return clamp_score(model_score)
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
 
-    return None
+    if not math.isfinite(value):
+        return None
+
+    # ML models sometimes return probability as 0-1.
+    if 0.0 <= value <= 1.0:
+        value *= 100.0
+
+    return clamp_score(value)
 
 
 # =========================================================
-# RISK ENGINE
+# RISK CALCULATION
 # =========================================================
 
 def calculate_risk(
@@ -146,26 +95,13 @@ def calculate_risk(
     """
     Combine Rule Engine and ML model results.
 
-    Current design:
+    Rule Engine = 40%
+    ML Model    = 60%
 
-        Rule Engine = 40%
-        ML Model    = 60%
+    If ML is unavailable, the Rule Engine score is used.
 
-    If ML is not available yet, the Rule Engine is used
-    temporarily so the backend continues to work.
-
-    Parameters
-    ----------
-    rule_result : dict
-        Output from ai_ml.rule_engine.analyze_text()
-
-    ml_result : dict or None
-        Output from Aryan's ML model.
-
-    Returns
-    -------
-    dict
-        Final structured risk result.
+    Strong contextual rules are protected from being
+    completely overridden by a conflicting ML prediction.
     """
 
     # -----------------------------------------------------
@@ -176,10 +112,7 @@ def calculate_risk(
         rule_result = {}
 
     rule_score = clamp_score(
-        rule_result.get(
-            "score",
-            0
-        )
+        rule_result.get("score", 0)
     )
 
     # -----------------------------------------------------
@@ -203,7 +136,11 @@ def calculate_risk(
         )
 
         return {
-            "score": round(final_score, 2),
+            "score": round(
+                final_score,
+                2
+            ),
+
             "level": level,
 
             "method": "rule_only",
@@ -234,13 +171,53 @@ def calculate_risk(
         ml_score * ML_WEIGHT
     )
 
+    # -----------------------------------------------------
+    # Contextual phishing protection
+    # -----------------------------------------------------
+
+    signals = rule_result.get(
+        "signals",
+        []
+    )
+
+    if not isinstance(signals, list):
+        signals = []
+
+    signal_types = {
+        signal.get("type")
+        for signal in signals
+        if isinstance(signal, dict)
+    }
+
+    # Password-expiration + action link is strong
+    # contextual evidence. Prevent the ML model from
+    # completely overriding that evidence.
+    if "password_expiration_link" in signal_types:
+
+        final_score = max(
+            final_score,
+            rule_score
+        )
+
+    # -----------------------------------------------------
+    # Clamp final score
+    # -----------------------------------------------------
+
     final_score = clamp_score(
         final_score
     )
 
+    # -----------------------------------------------------
+    # Risk level
+    # -----------------------------------------------------
+
     level = get_risk_level(
         final_score
     )
+
+    # -----------------------------------------------------
+    # Final result
+    # -----------------------------------------------------
 
     return {
         "score": round(
@@ -273,30 +250,35 @@ def calculate_risk(
 
 
 # =========================================================
-# BUILD FINAL EXPLANATION
+# EXPLANATION
 # =========================================================
 
-def build_risk_explanation(
-    risk_result,
-    rule_result
+def build_explanation(
+    rule_result,
+    ml_result,
+    risk_result
 ):
     """
-    Create a structured explanation for the frontend.
-
-    This is not the final Gemma explanation.
-    Gemma will later make the explanation more natural.
+    Build a human-readable explanation from the
+    Rule Engine, ML model, and Risk Engine.
     """
 
     reasons = []
 
-    if isinstance(rule_result, dict):
+    if not isinstance(rule_result, dict):
+        rule_result = {}
 
-        signals = rule_result.get(
-            "signals",
-            []
-        )
+    signals = rule_result.get(
+        "signals",
+        []
+    )
+
+    if isinstance(signals, list):
 
         for signal in signals:
+
+            if not isinstance(signal, dict):
+                continue
 
             message = signal.get(
                 "message"
@@ -307,26 +289,87 @@ def build_risk_explanation(
                     message
                 )
 
-    score = risk_result.get(
-        "score",
-        0
+    if isinstance(ml_result, dict):
+
+        phishing_probability = (
+            extract_ml_score(
+                ml_result
+            )
+        )
+
+        if phishing_probability is not None:
+
+            if phishing_probability >= 75:
+
+                reasons.append(
+                    "The machine learning model "
+                    "identified a high phishing probability."
+                )
+
+            elif phishing_probability <= 25:
+
+                reasons.append(
+                    "The machine learning model "
+                    "identified a high legitimate probability."
+                )
+
+    if not reasons:
+
+        reasons.append(
+            "No significant phishing indicators "
+            "were detected."
+        )
+
+    level = (
+        risk_result.get(
+            "level",
+            "LOW"
+        )
+        if isinstance(risk_result, dict)
+        else "LOW"
     )
 
-    level = risk_result.get(
-        "level",
-        "UNKNOWN"
+    score = (
+        risk_result.get(
+            "score",
+            0
+        )
+        if isinstance(risk_result, dict)
+        else 0
     )
+
+    if level == "CRITICAL":
+
+        summary = (
+            "The message contains multiple high-risk "
+            "indicators and should be treated as phishing."
+        )
+
+    elif level == "HIGH":
+
+        summary = (
+            "The message contains significant phishing "
+            "indicators and should be treated with caution."
+        )
+
+    elif level == "MEDIUM":
+
+        summary = (
+            "The message contains suspicious indicators "
+            "that require further verification."
+        )
+
+    else:
+
+        summary = (
+            "The message has a low overall risk score "
+            "based on the available evidence."
+        )
 
     return {
-        "summary": (
-            f"Current risk assessment: "
-            f"{level} ({score}/100)."
-        ),
-
+        "summary": summary,
         "reasons": reasons,
-
         "risk_level": level,
-
         "risk_score": score
     }
 
@@ -340,9 +383,7 @@ def evaluate(
     ml_result=None
 ):
     """
-    Complete Risk Engine operation.
-
-    This function is the main function that Flask will call.
+    Run the complete Risk Engine pipeline.
     """
 
     risk_result = calculate_risk(
@@ -350,9 +391,10 @@ def evaluate(
         ml_result
     )
 
-    explanation = build_risk_explanation(
-        risk_result,
-        rule_result
+    explanation = build_explanation(
+        rule_result,
+        ml_result,
+        risk_result
     )
 
     return {
@@ -367,16 +409,10 @@ def evaluate(
 
 if __name__ == "__main__":
 
-    import json
-
-    # -----------------------------------------------------
-    # Fake Rule Engine result
-    # -----------------------------------------------------
-
     example_rules = {
-        "score": 80,
+        "score": 35,
 
-        "risk_level": "CRITICAL",
+        "risk_level": "MEDIUM",
 
         "signals": [
             {
@@ -384,57 +420,38 @@ if __name__ == "__main__":
                 "severity": "high",
                 "score": 15,
                 "message": (
-                    "The message uses urgent "
-                    "or threatening language."
+                    "The message uses urgent or "
+                    "threatening language."
                 )
             },
-
             {
-                "type": "suspicious_link",
+                "type": "password_expiration_link",
                 "severity": "high",
                 "score": 20,
                 "message": (
-                    "The message contains a "
-                    "potentially suspicious URL."
+                    "The message combines password-expiration "
+                    "language with a link requiring password action."
                 )
             }
-        ]
+        ],
+
+        "suspicious_urls": [],
+
+        "signal_count": 2
     }
 
-    # -----------------------------------------------------
-    # Test 1: Rule Engine only
-    # -----------------------------------------------------
-
-    print("\n========== RULE ONLY ==========\n")
-
-    result = evaluate(
-        example_rules
-    )
-
-    print(
-        json.dumps(
-            result,
-            indent=4,
-            ensure_ascii=False
-        )
-    )
-
-    # -----------------------------------------------------
-    # Test 2: Rule + fake ML result
-    # -----------------------------------------------------
-
-    print("\n========== RULE + ML ==========\n")
-
     fake_ml_result = {
-        "label": "phishing",
-        "phishing_probability": 0.90,
-        "legitimate_probability": 0.10
+        "label": "Legitimate",
+        "phishing_probability": 0.20,
+        "legitimate_probability": 0.80
     }
 
     result = evaluate(
         example_rules,
         fake_ml_result
     )
+
+    import json
 
     print(
         json.dumps(
