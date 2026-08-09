@@ -10,6 +10,7 @@ import SessionHistory from "./components/SessionHistory";
 import TrendingScams from "./components/TrendingScams";
 import DnaPanel from "./components/DnaPanel";
 import ReportPanel from "./components/ReportPanel";
+import IncidentResponsePanel from "./components/IncidentResponsePanel";
 import { LocaleProvider, useLocale } from "./i18n/LocaleContext";
 import { ThemeProvider } from "./theme/ThemeContext";
 
@@ -212,6 +213,7 @@ function Dashboard() {
   const [scanning, setScanning] = useState(false);
   const [dnaOpen, setDnaOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [incidentOpen, setIncidentOpen] = useState(false);
 
   /**
    * Real backend analysis.
@@ -242,10 +244,9 @@ function Dashboard() {
           body: formData,
         });
       } else {
-
-      /*
-       * TEXT ANALYSIS
-       */
+        /*
+         * TEXT ANALYSIS
+         */
         response = await fetch(`${API_BASE}/api/analyze/text`, {
           method: "POST",
           headers: {
@@ -378,6 +379,7 @@ function Dashboard() {
                 scanning={scanning}
                 onReport={() => result && setReportOpen(true)}
                 onDna={() => result && setDnaOpen(true)}
+                onIncident={() => result && setIncidentOpen(true)}
               />
             </div>
 
@@ -427,6 +429,11 @@ function Dashboard() {
       <ReportPanel
         open={reportOpen}
         onClose={() => setReportOpen(false)}
+        result={result}
+      />
+      <IncidentResponsePanel
+        open={incidentOpen}
+        onClose={() => setIncidentOpen(false)}
         result={result}
       />
     </div>
