@@ -124,7 +124,7 @@ function Gauge({ score, color, verdictLabel, Icon }) {
   );
 }
 
-export default function AnalysisCard({ result, scanning, onReport, onDna }) {
+export default function AnalysisCard({ result, scanning, onReport, onDna, onIncident }) {
   const { t, locale } = useLocale();
   const [copied, setCopied] = useState(false);
 
@@ -387,6 +387,10 @@ export default function AnalysisCard({ result, scanning, onReport, onDna }) {
           <button onClick={onDna} className="btn-ghost flex-1 hover:!border-beam/50 hover:!text-beam sm:flex-none">
             <Fingerprint size={15} strokeWidth={2.4} />
             {t("dnaFingerprint")}
+          </button>
+          <button onClick={onIncident} className="btn-ghost flex-1 border-warn/40 text-warn hover:!border-warn hover:!text-warn sm:flex-none">
+            <Siren size={15} strokeWidth={2.4} />
+            {t("Already Clicked")}
           </button>
         </div>
       </div>
